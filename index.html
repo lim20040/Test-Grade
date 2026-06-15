@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>OMR 자동 채점 시스템 - 최종 완벽 버전</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+    <style>
+        body { font-family: '맑은 고딕', sans-serif; background-color: #f4f7f6; margin: 0; padding: 0; color: #333; }
+        .header { background-color: #2c3e50; color: white; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; }
+        .header h1 { margin: 0; font-size: 24px; }
+        .nav-btns button { background-color: #3498db; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; margin-left: 10px; font-weight: bold; }
+        .nav-btns button:hover { background-color: #2980b9; }
+        .nav-btns button.admin-btn { background-color: #e74c3c; }
+        .nav-btns button.logout-btn { background-color: #7f8c8d; }
+        
+        .container { max-width: 1000px; margin: 30px auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        h2 { border-bottom: 2px solid #eee; padding-bottom: 10px; margin-top: 0; }
+        
+        input[type="text"], input[type="number"], input[type="email"], input[type="password"] { padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+        .primary-btn { background-color: #2ecc71; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; }
+        .secondary-btn { background-color: #95a5a6; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 16px; }
+        .delete-btn { background-color: #e74c3c; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+        .view-btn { background-color: #f39c12; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; margin-right: 5px; }
+        
+        .test-list { list-style: none; padding: 0; }
+        .test-list li { background: #f8f9fa; margin-bottom: 10px; padding: 15px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #ddd; }
+        .take-test-btn { background-color: #3498db; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: center; }
+        th { background-color: #f2f2f2; }
+        
+        .omr-grid { display: flex; flex-wrap: wrap; gap: 15px; margin-top: 20px; background: #f9fbfd; padding: 20px; border-radius: 8px; border: 1px solid #bde0fe; }
+        .omr-item { display: flex; align-items: center; background: white; padding: 8px 15px; border-radius: 5px; border: 1px solid #ddd; }
+        .omr-item strong { width: 40px; color: #2c3e50; }
+        .omr-item input { width: 60px; text-align: center; font-size: 16px; font-weight: bold; }
+        
+        .hidden { display: none !important; }
+        .result-box { margin-top: 25px; padding: 20px; background-color: #fff3cd; border: 1px solid #ffe69c; border-radius: 8px; text-align: center; font-size: 18px; }
+
+        .auth-box { max-width: 400px; margin: 100px auto; background: white; padding: 40px; border-radius: 10px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); text-align: center; }
+        .auth-box input { width: 100%; box-sizing: border-box; margin-bottom: 15px; padding: 12px; font-size: 16px; }
+        .auth-box button { width: 100%; margin-bottom: 10px; }
+        .badge { background-color: #e74c3c; color: white; padding: 3px 8px; border-radius: 10px; font-size: 12px; margin-left: 5px; vertical-align: middle; }
+    </style>
+</head>
+<body>
+
+    <div id="main-header" class="header hidden">
+        <h1>📝 OMR 채점 시스템 <span id="admin-badge" class="badge hidden">최고 관리자</span></h1>
+        <div class="nav-btns">
+            <span id="user-email-display" style="margin-right: 15px; font-size: 14px; color: #bdc3c7;"></span>
+            <button onclick="showPage('student-list')">시험지 목록(공유)</button>
+            <button class="admin-btn" id="dashboard-btn" onclick="showPage('admin')">대시보드</button>
+            <button class="logout-btn" onclick="logout()">로그아웃</button>
+        </div>
+    </div>
+
+    <div id="auth-page" class="auth-box">
+        <h2 style="border:none;">🔐 시스템 로그인</h2>
+        <p style="color:#7f8c8d; margin-bottom:30px;">공동 시험지 및 성적 관리 시스템</p>
+        <input type="email" id="auth-email" placeholder="이메일 주소">
+        <input type="password" id="auth-password" placeholder="비밀번호 (6자리 이상)">
+        <button class="primary-btn" onclick="login()">로그인</button>
+        <button class="secondary-btn" onclick="signup()">새 선생님 계정 가입</button>
+    </div>
+
+    <div id="student-list-page" class="container hidden">
+        <h2>📚 응시 가능한 시험지 목록</h2>
+        <p>최고 관리자가 등록한 시험지 리스트입니다. 성적을 입력할 시험지를 선택해 주세요.</p>
+        <ul id="student-test-list" class="test-list"></ul>
+    </div>
+
+    <div id="student-exam-page" class="container hidden">
+        <h2 id="exam-title-display">성적 입력 화면</h2>
+        <div style="margin-bottom: 20px;">
+            <strong>학생 이름:</strong> 
+            <input type="text" id="student-name" placeholder="학생 이름을 입력하세요" style="width: 200px; margin-left: 10px;">
+        </div>
+        <div id="student-questions" class="omr-grid"></div>
+        <div style="display: flex; gap: 10px; margin-top: 20px;">
+            <button class="primary-btn" id="submit-btn" onclick="submitExam()">성적 제출 (서버 기록)</button>
+            <button class="secondary-btn" onclick="showPage('student-list')">목록으로 돌아가기</button>
+        </div>
+        <div id="exam-result" class="result-box hidden"></div>
+    </div>
+
+    <div id="admin-page" class="container hidden">
+        <h2 id="dashboard-title">🛠️ 대시보드</h2>
+        
+        <div id="super-admin-create-area" class="hidden" style="background: #fdfbf7; padding: 20px; border: 1px solid #faedcd; border-radius: 5px; margin-bottom: 30px;">
+            <h3>➕ [최고 관리자] 새 시험지 만들기</h3>
+            시험지 이름: <input type="text" id="new-test-name" placeholder="예: 3학년 단원평가">
+            문항 수: <input type="number" id="new-test-count" placeholder="예: 20" min="1" style="width: 80px; margin-left: 10px;">
+            <button class="primary-btn" style="margin-top: 0; padding: 8px 15px; margin-left: 10px;" onclick="generateQuestionInputs()">문항 설정하기</button>
+            
+            <div id="admin-questions-area" class="hidden" style="margin-top: 20px;">
+                <table>
+                    <thead>
+                        <tr><th>문항 번호</th><th>정답 입력 (숫자)</th><th>배점 입력 (점수)</th></tr>
+                    </thead>
+                    <tbody id="admin-questions-tbody"></tbody>
+                </table>
+                <button class="primary-btn" onclick="saveTest()">시험지 최종 배포</button>
+            </div>
+        </div>
+
+        <h3>📂 등록된 시험지 및 성적 조회</h3>
+        <ul id="admin-test-list" class="test-list"></ul>
+
+        <div id="admin-specific-results-area" class="hidden" style="margin-top: 30px; border-top: 2px dashed #ccc; padding-top: 20px; background-color: #f8f9fa; padding: 20px; border-radius: 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <h3 id="admin-results-title" style="margin: 0;">📊 성적 명단</h3>
+                <button class="secondary-btn" style="margin: 0; padding: 6px 12px; font-size: 14px;" onclick="closeAdminResults()">닫기</button>
+            </div>
+            <table id="admin-results-table">
+                <thead>
+                    <tr>
+                        <th>응시일</th>
+                        <th>학생 이름</th>
+                        <th>총점</th>
+                        <th id="th-teacher-column">입력한 선생님</th>
+                        <th>틀린 문항</th>
+                        <th>기록 관리</th>
+                    </tr>
+                </thead>
+                <tbody id="admin-results-tbody"></tbody>
+            </table>
+        </div>
+
+        <div id="super-admin-teacher-list-area" class="hidden" style="margin-top: 40px; border-top: 2px solid #2c3e50; padding-top: 20px;">
+            <h3 style="color:#e74c3c;">👨‍🏫 [최고 관리자 전용] 가입된 선생님 계정 목록</h3>
+            <p style="font-size: 14px; color: #7f8c8d;">우리 시스템에 가입한 모든 선생님의 이메일을 확인합니다.</p>
+            <ul id="teacher-list-ul" class="test-list"></ul>
+        </div>
+    </div>
+
+    <script>
+        // ⚠️ 이 3가지 값을 정확하게 적어주셔야 데이터가 움직입니다!
+        const SUPABASE_URL = "https://ltmxwlubtfjlsqdtizcl.supabase.co";
+        const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx0bXh3bHVidGZqbHNxZHRpemNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1MzQzNzYsImV4cCI6MjA5NzExMDM3Nn0.nBqexNA_K4wFnfomVxuVkK0QErqz4GCZwBrYWmZBPQw";
+        const SUPER_ADMIN_EMAIL = "lim200404@naver.com"; 
+
+        const { createClient } = supabase;
+        const _supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        let currentUser = null;
+        let currentTestId = null;
+        let isSuperAdmin = false;
+
+        // 세션 체크 및 자동 로그인 후속 조치
+        _supabase.auth.getSession().then(({ data: { session } }) => {
+            if (session) handleAuthSuccess(session.user);
+            else showPage('auth');
+        });
+
+        _supabase.auth.onAuthStateChange((event, session) => {
+            if (session) handleAuthSuccess(session.user);
+            else { currentUser = null; isSuperAdmin = false; showPage('auth'); }
+        });
+
+        function handleAuthSuccess(user) {
+            currentUser = user;
+            isSuperAdmin = (currentUser.email === SUPER_ADMIN_EMAIL);
+            document.getElementById('user-email-display').innerText = currentUser.email;
+            
+            if(isSuperAdmin) {
+                document.getElementById('admin-badge').classList.remove('hidden');
+                document.getElementById('dashboard-btn').innerText = "최고 관리자 대시보드";
+                document.getElementById('super-admin-create-area').classList.remove('hidden');
+                document.getElementById('th-teacher-column').classList.remove('hidden');
+                document.getElementById('super-admin-teacher-list-area').classList.remove('hidden');
+            } else {
+                document.getElementById('admin-badge').classList.add('hidden');
+                document.getElementById('dashboard-btn').innerText = "내 성적 관리";
+                document.getElementById('super-admin-create-area').classList.add('hidden');
+                document.getElementById('th-teacher-column').classList.add('hidden');
+                document.getElementById('super-admin-teacher-list-area').classList.add('hidden');
+            }
+            showPage('student-list');
+        }
+
+        // ★ 회원가입 에러 명시화 코드
+        async function signup() {
+            const email = document.getElementById('auth-email').value.trim();
+            const password = document.getElementById('auth-password').value;
+            if(!email || password.length < 6) { alert("⚠️ 올바른 이메일과 6자리 이상의 비밀번호를 입력하세요."); return; }
+            
+            const { data, error } = await _supabase.auth.signUp({ email, password });
+            if(error) {
+                alert("❌ 회원가입 서버 거절! 사유: " + error.message);
+            } else {
+                if (data.user) {
+                    const { error: tableError } = await _supabase.from('registered_teachers').insert([{ id: data.user.id, email: email }]);
+                    if(tableError) console.error("명단 누락 위험:", tableError.message);
+                }
+                alert("🎉 회원가입 성공! 이제 로그인 버튼을 눌러 접속하세요.");
+            }
+        }
+
+        // ★ 로그인 에러 명시화 코드
+        async function login() {
+            const email = document.getElementById('auth-email').value.trim();
+            const password = document.getElementById('auth-password').value;
+            const { error } = await _supabase.auth.signInWithPassword({ email, password });
+            if (error) {
+                alert("❌ 로그인 실패! 사유: " + error.message);
+            }
+        }
+
+        async function logout() { if(confirm("로그아웃 하시겠습니까?")) await _supabase.auth.signOut(); }
+
+        async function showPage(pageId) {
+            document.getElementById('auth-page').classList.add('hidden');
+            document.getElementById('student-list-page').classList.add('hidden');
+            document.getElementById('student-exam-page').classList.add('hidden');
+            document.getElementById('admin-page').classList.add('hidden');
+            document.getElementById('main-header').classList.add('hidden');
+            
+            if(pageId === 'auth') {
+                document.getElementById('auth-page').classList.remove('hidden');
+            } else {
+                document.getElementById('main-header').classList.remove('hidden');
+                if (pageId === 'student-list') {
+                    document.getElementById('student-list-page').classList.remove('hidden');
+                    await loadAllTests(); 
+                } else if (pageId === 'student-exam') {
+                    document.getElementById('student-exam-page').classList.remove('hidden');
+                } else if (pageId === 'admin') {
+                    document.getElementById('admin-page').classList.remove('hidden');
+                    if(isSuperAdmin) {
+                        document.getElementById('dashboard-title').innerText = "🛠️ 최고 관리자 대시보드 (통합 모니터링)";
+                        await loadTeachersList(); 
+                    } else {
+                        document.getElementById('dashboard-title').innerText = "🛠️ 선생님 개인 대시보드";
+                    }
+                    await loadAllTests(); 
+                    closeAdminResults();
+                }
+            }
+        }
+
+        async function loadTeachersList() {
+            if(!isSuperAdmin) return;
+            const { data: teachers, error } = await _supabase.from('registered_teachers').select('*');
+            let ul = document.getElementById('teacher-list-ul');
+            ul.innerHTML = '';
+            
+            if(error) {
+                ul.innerHTML = `<li>명단 로드 실패: ${error.message}</li>`;
+                return;
+            }
+            if(!teachers || teachers.length === 0) {
+                ul.innerHTML = '<li>가입된 다른 선생님이 없습니다.</li>';
+                return;
+            }
+
+            teachers.forEach(t => {
+                let li = document.createElement('li');
+                let date = new Date(t.created_at).toLocaleDateString();
+                li.innerHTML = `<span>👤 <strong>${t.email}</strong></span> <span style="font-size:13px; color:#7f8c8d;">가입일: ${date}</span>`;
+                ul.appendChild(li);
+            });
+        }
+
+        function generateQuestionInputs() {
+            let count = parseInt(document.getElementById('new-test-count').value);
+            let tbody = document.getElementById('admin-questions-tbody');
+            tbody.innerHTML = ''; 
+            for (let i = 1; i <= count; i++) {
+                let tr = document.createElement('tr');
+                tr.innerHTML = `<td>${i}번</td><td><input type="number" id="ans-${i}"></td><td><input type="number" id="pt-${i}" value="${(100/count).toFixed(1)}"></td>`;
+                tbody.appendChild(tr);
+            }
+            document.getElementById('admin-questions-area').classList.remove('hidden');
+        }
+
+        async function saveTest() {
+            if(!isSuperAdmin) { alert("권한이 없습니다."); return; }
+            let name = document.getElementById('new-test-name').value.trim();
+            let count = parseInt(document.getElementById('new-test-count').value);
+            let questions = [];
+
+            if(!name || isNaN(count)) { alert("시험지 이름과 문항수를 적어주세요."); return; }
+
+            for (let i = 1; i <= count; i++) {
+                let ansStr = document.getElementById(`ans-${i}`).value;
+                let ptStr = document.getElementById(`pt-${i}`).value;
+                if(!ansStr || !ptStr) { alert("정답이나 배점에 빈칸이 있습니다."); return; }
+                questions.push({ answer: parseInt(ansStr), point: parseFloat(ptStr) });
+            }
+
+            const { error } = await _supabase.from('omr_tests').insert([
+                { id: Date.now(), user_id: currentUser.id, name: name, count: count, questions: questions }
+            ]);
+
+            if (error) {
+                alert("❌ 시험지 배포 실패! 사유: " + error.message);
+                return;
+            }
+
+            alert("모든 선생님 화면에 시험지가 배포되었습니다!");
+            document.getElementById('new-test-name').value = '';
+            document.getElementById('new-test-count').value = '';
+            document.getElementById('admin-questions-area').classList.add('hidden');
+            await loadAllTests();
+        }
+
+        async function loadAllTests() {
+            const { data: serverTests, error } = await _supabase.from('omr_tests').select('*');
+            
+            let ulStudent = document.getElementById('student-test-list');
+            ulStudent.innerHTML = '';
+            let ulAdmin = document.getElementById('admin-test-list');
+            ulAdmin.innerHTML = '';
+
+            if(error) {
+                ulStudent.innerHTML = `<li>서버 연결 에러: ${error.message}</li>`;
+                return;
+            }
+
+            if(!serverTests || serverTests.length === 0) {
+                ulStudent.innerHTML = '<li>현재 대기 중인 시험지가 없습니다.</li>';
+                ulAdmin.innerHTML = '<li>등록된 시험지가 없습니다.</li>';
+                return;
+            }
+
+            serverTests.forEach(test => {
+                let liStu = document.createElement('li');
+                liStu.innerHTML = `<span><strong>${test.name}</strong> (${test.count}문항)</span><button class="take-test-btn" onclick="openExam(${test.id})">성적 입력하기</button>`;
+                ulStudent.appendChild(liStu);
+
+                let liAdm = document.createElement('li');
+                let deleteBtnHtml = isSuperAdmin ? `<button class="delete-btn" onclick="deleteTest(${test.id})">시험지 폐기</button>` : '';
+                liAdm.innerHTML = `<span><strong>${test.name}</strong> (${test.count}문항)</span>
+                    <div>
+                        <button class="view-btn" onclick="viewAdminResults(${test.id}, '${test.name}')">결과 확인</button>
+                        ${deleteBtnHtml}
+                    </div>`;
+                ulAdmin.appendChild(liAdm);
+            });
+        }
+
+        async function deleteTest(id) {
+            if(!isSuperAdmin) return;
+            if(confirm("이 시험지와 관련된 모든 성적 데이터가 삭제됩니다. 진행하시겠습니까?")) {
+                await _supabase.from('omr_tests').delete().eq('id', id);
+                await _supabase.from('omr_results').delete().eq('test_id', id);
+                await loadAllTests();
+                closeAdminResults();
+            }
+        }
+
+        /* --- 성적 입력 및 제출 --- */
+        async function openExam(id) {
+            currentTestId = id;
+            const { data } = await _supabase.from('omr_tests').select('*').eq('id', id).single();
+            
+            showPage('student-exam');
+            document.getElementById('exam-title-display').innerHTML = `<span style="color:#3498db;">[${data.name}]</span> 성적 기입란`;
+            document.getElementById('student-name').value = '';
+            document.getElementById('exam-result').classList.add('hidden');
+            document.getElementById('submit-btn').disabled = false;
+            
+            let qArea = document.getElementById('student-questions');
+            qArea.innerHTML = '';
+            for(let i=1; i<=data.count; i++) {
+                let div = document.createElement('div');
+                div.className = 'omr-item';
+                div.innerHTML = `<strong>${i}번</strong> <input type="number" id="stu-ans-${i}">`;
+                qArea.appendChild(div);
+            }
+        }
+
+        async function submitExam() {
+            let studentName = document.getElementById('student-name').value.trim();
+            if(!studentName) { alert("이름을 입력하세요!"); return; }
+            document.getElementById('submit-btn').disabled = true;
+
+            const { data: test } = await _supabase.from('omr_tests').select('*').eq('id', currentTestId).single();
+            let totalScore = 0;
+            let wrongList = [];
+
+            for(let i=1; i<=test.count; i++) {
+                let stuAnsStr = document.getElementById(`stu-ans-${i}`).value;
+                if(!stuAnsStr) { alert(`${i}번 답이 누락되었습니다.`); document.getElementById('submit-btn').disabled = false; return; }
+                
+                let stuAns = parseInt(stuAnsStr);
+                if (stuAns === test.questions[i-1].answer) totalScore += test.questions[i-1].point;
+                else wrongList.push(i);
+            }
+
+            let finalScore = totalScore.toFixed(1);
+            let today = new Date();
+            let dateString = `${today.getFullYear()}-${(today.getMonth()+1).toString().padStart(2,'0')}-${today.getDate().toString().padStart(2,'0')}`;
+
+            const { error } = await _supabase.from('omr_results').insert([
+                { id: Date.now(), test_id: currentTestId, user_id: currentUser.id, teacher_email: currentUser.email, date: dateString, student_name: studentName, score: finalScore, wrong_list: wrongList }
+            ]);
+
+            if (error) {
+                alert("❌ 성적 전송 실패! 사유: " + error.message);
+                document.getElementById('submit-btn').disabled = false;
+                return;
+            }
+
+            let resultDiv = document.getElementById('exam-result');
+            resultDiv.innerHTML = `정상 등록 완료!<br><strong>${studentName}</strong>: <span style="color:#e74c3c; font-size:24px;">${finalScore}점</span>`;
+            resultDiv.classList.remove('hidden');
+            alert("최고 관리자 서버로 성적이 전송되었습니다!");
+        }
+
+        /* --- 대시보드 결과 조회 --- */
+        async function viewAdminResults(targetTestId, testName) {
+            document.getElementById('admin-specific-results-area').classList.remove('hidden');
+            document.getElementById('admin-results-title').innerHTML = `📊 [${testName}] 입력 현황`;
+
+            let query = _supabase.from('omr_results').select('*').eq('test_id', targetTestId);
+            if (!isSuperAdmin) { query = query.eq('user_id', currentUser.id); }
+
+            const { data: serverResults, error } = await query;
+            let tbody = document.getElementById('admin-results-tbody');
+            tbody.innerHTML = '';
+            
+            if(error) {
+                tbody.innerHTML = `<tr><td colspan="6">데이터 로드 에러: ${error.message}</td></tr>`;
+                return;
+            }
+
+            if(!serverResults || serverResults.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6">조회할 데이터가 없습니다.</td></tr>';
+                return;
+            }
+
+            serverResults.reverse().forEach(res => {
+                let tr = document.createElement('tr');
+                let teacherTdHtml = isSuperAdmin ? `<td style="color:#2980b9; font-size:13px;">${res.teacher_email}</td>` : '';
+                let deleteBtnHtml = (isSuperAdmin || res.user_id === currentUser.id) ? `<button class="delete-btn" onclick="deleteSingleResult(${res.id}, ${targetTestId}, '${testName}')">삭제</button>` : '권한없음';
+
+                tr.innerHTML = `
+                    <td>${res.date}</td>
+                    <td><strong>${res.student_name}</strong></td>
+                    <td style="color:#c0392b; font-weight:bold;">${res.score}점</td>
+                    ${teacherTdHtml}
+                    <td>${res.wrong_list.length > 0 ? res.wrong_list.join(', ') + '번' : '만점'}</td>
+                    <td>${deleteBtnHtml}</td>`;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function closeAdminResults() { document.getElementById('admin-specific-results-area').classList.add('hidden'); }
+
+        async function deleteSingleResult(resultId, testId, testName) {
+            if(confirm("이 성적 기록을 서버에서 영구 삭제하시겠습니까?")) {
+                await _supabase.from('omr_results').delete().eq('id', resultId);
+                await viewAdminResults(testId, testName);
+            }
+        }
+    </script>
+</body>
+</html>
