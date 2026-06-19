@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>OMR 자동 채점 시스템 - 최종 완벽 버전</title>
+    <title>OMR 자동 채점 시스템 - 시험지 수정 기능 버전</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
     <style>
         body { font-family: '맑은 고딕', sans-serif; background-color: #f4f7f6; margin: 0; padding: 0; color: #333; }
@@ -31,10 +31,14 @@
         th { background-color: #f2f2f2; }
         
         .omr-grid { display: flex; flex-wrap: wrap; gap: 15px; margin-top: 20px; background: #f9fbfd; padding: 20px; border-radius: 8px; border: 1px solid #bde0fe; }
-        .omr-item { display: flex; align-items: center; background: white; padding: 8px 15px; border-radius: 5px; border: 1px solid #ddd; }
+        .omr-item { display: flex; align-items: center; background: white; padding: 8px 15px; border-radius: 5px; border: 1px solid #ddd; gap: 6px; }
         .omr-item strong { width: 40px; color: #2c3e50; }
-        .omr-item input { width: 60px; text-align: center; font-size: 16px; font-weight: bold; }
+        .omr-item input { width: 80px; text-align: center; font-size: 15px; }
         
+        .ox-btn { border: 1px solid #ccc; background: #fff; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 14px; color: #555; }
+        .ox-btn.active-o { background-color: #2ecc71 !important; color: white !important; border-color: #27ae60 !important; }
+        .ox-btn.active-x { background-color: #e74c3c !important; color: white !important; border-color: #c0392b !important; }
+
         .hidden { display: none !important; }
         .result-box { margin-top: 25px; padding: 20px; background-color: #fff3cd; border: 1px solid #ffe69c; border-radius: 8px; text-align: center; font-size: 18px; }
 
@@ -89,19 +93,22 @@
         <h2 id="dashboard-title">🛠️ 대시보드</h2>
         
         <div id="super-admin-create-area" class="hidden" style="background: #fdfbf7; padding: 20px; border: 1px solid #faedcd; border-radius: 5px; margin-bottom: 30px;">
-            <h3>➕ [최고 관리자] 새 시험지 만들기</h3>
+            <h3 id="create-area-title">➕ [최고 관리자] 새 시험지 만들기</h3>
             시험지 이름: <input type="text" id="new-test-name" placeholder="예: 3학년 단원평가">
             문항 수: <input type="number" id="new-test-count" placeholder="예: 20" min="1" style="width: 80px; margin-left: 10px;">
-            <button class="primary-btn" style="margin-top: 0; padding: 8px 15px; margin-left: 10px;" onclick="generateQuestionInputs()">문항 설정하기</button>
+            <button class="primary-btn" id="setup-questions-btn" style="margin-top: 0; padding: 8px 15px; margin-left: 10px;" onclick="generateQuestionInputs()">문항 설정하기</button>
             
             <div id="admin-questions-area" class="hidden" style="margin-top: 20px;">
                 <table>
                     <thead>
-                        <tr><th>문항 번호</th><th>정답 입력 (숫자)</th><th>배점 입력 (점수)</th></tr>
+                        <tr><th>문항 번호</th><th>정답 입력 (텍스트/수식 가능)</th><th>배점 입력 (점수)</th></tr>
                     </thead>
                     <tbody id="admin-questions-tbody"></tbody>
                 </table>
-                <button class="primary-btn" onclick="saveTest()">시험지 최종 배포</button>
+                <div style="margin-top: 15px; display: flex; gap: 10px;">
+                    <button class="primary-btn" id="save-test-btn" onclick="saveTest()">시험지 최종 배포</button>
+                    <button class="secondary-btn hidden" id="cancel-edit-btn" onclick="cancelEdit()">수정 취소</button>
+                </div>
             </div>
         </div>
 
@@ -136,9 +143,9 @@
     </div>
 
     <script>
-        // ⚠️ 이 3가지 값을 정확하게 적어주셔야 데이터가 움직입니다!
-        const SUPABASE_URL = "https://ltmxwlubtfjlsqdtizcl.supabase.co";
-        const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx0bXh3bHVidGZqbHNxZHRpemNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1MzQzNzYsImV4cCI6MjA5NzExMDM3Nn0.nBqexNA_K4wFnfomVxuVkK0QErqz4GCZwBrYWmZBPQw";
+        // ⚠️ 본인의 정보로 채워넣으셔야 정상 작동합니다!
+        const SUPABASE_URL = "test-grade.vercel.app";
+        const SUPABASE_ANON_KEY = "sb_publishable_AdKlOaWLsRyRwICMH_XMCQ_7lATgOvf";
         const SUPER_ADMIN_EMAIL = "lim200404@naver.com"; 
 
         const { createClient } = supabase;
@@ -147,8 +154,12 @@
         let currentUser = null;
         let currentTestId = null;
         let isSuperAdmin = false;
+        let manualGrades = {}; 
+        
+        // ★ 현재 수정 중인 시험지의 ID를 저장할 변수 (null이면 신규 출제 모드)
+        let editingTestId = null; 
 
-        // 세션 체크 및 자동 로그인 후속 조치
+        // 세션 체크 및 자동 로그인
         _supabase.auth.getSession().then(({ data: { session } }) => {
             if (session) handleAuthSuccess(session.user);
             else showPage('auth');
@@ -180,7 +191,6 @@
             showPage('student-list');
         }
 
-        // ★ 회원가입 에러 명시화 코드
         async function signup() {
             const email = document.getElementById('auth-email').value.trim();
             const password = document.getElementById('auth-password').value;
@@ -188,24 +198,20 @@
             
             const { data, error } = await _supabase.auth.signUp({ email, password });
             if(error) {
-                alert("❌ 회원가입 서버 거절! 사유: " + error.message);
+                alert("❌ 회원가입 실패: " + error.message);
             } else {
                 if (data.user) {
-                    const { error: tableError } = await _supabase.from('registered_teachers').insert([{ id: data.user.id, email: email }]);
-                    if(tableError) console.error("명단 누락 위험:", tableError.message);
+                    await _supabase.from('registered_teachers').insert([{ id: data.user.id, email: email }]);
                 }
                 alert("🎉 회원가입 성공! 이제 로그인 버튼을 눌러 접속하세요.");
             }
         }
 
-        // ★ 로그인 에러 명시화 코드
         async function login() {
             const email = document.getElementById('auth-email').value.trim();
             const password = document.getElementById('auth-password').value;
             const { error } = await _supabase.auth.signInWithPassword({ email, password });
-            if (error) {
-                alert("❌ 로그인 실패! 사유: " + error.message);
-            }
+            if (error) alert("❌ 로그인 실패: " + error.message);
         }
 
         async function logout() { if(confirm("로그아웃 하시겠습니까?")) await _supabase.auth.signOut(); }
@@ -234,6 +240,7 @@
                     } else {
                         document.getElementById('dashboard-title').innerText = "🛠️ 선생님 개인 대시보드";
                     }
+                    cancelEdit(); // 대시보드 진입 시 수정 상태 초기화
                     await loadAllTests(); 
                     closeAdminResults();
                 }
@@ -245,16 +252,10 @@
             const { data: teachers, error } = await _supabase.from('registered_teachers').select('*');
             let ul = document.getElementById('teacher-list-ul');
             ul.innerHTML = '';
-            
-            if(error) {
-                ul.innerHTML = `<li>명단 로드 실패: ${error.message}</li>`;
-                return;
-            }
-            if(!teachers || teachers.length === 0) {
+            if(error || !teachers || teachers.length === 0) {
                 ul.innerHTML = '<li>가입된 다른 선생님이 없습니다.</li>';
                 return;
             }
-
             teachers.forEach(t => {
                 let li = document.createElement('li');
                 let date = new Date(t.created_at).toLocaleDateString();
@@ -269,10 +270,52 @@
             tbody.innerHTML = ''; 
             for (let i = 1; i <= count; i++) {
                 let tr = document.createElement('tr');
-                tr.innerHTML = `<td>${i}번</td><td><input type="number" id="ans-${i}"></td><td><input type="number" id="pt-${i}" value="${(100/count).toFixed(1)}"></td>`;
+                tr.innerHTML = `<td>${i}번</td><td><input type="text" id="ans-${i}" placeholder="예: 5 또는 루트3"></td><td><input type="number" id="pt-${i}" value="${(100/count).toFixed(1)}"></td>`;
                 tbody.appendChild(tr);
             }
             document.getElementById('admin-questions-area').classList.remove('hidden');
+        }
+
+        // ★ [기능 추가] 수정 버튼을 눌렀을 때 기존 데이터를 입력창에 채워주는 함수
+        async function editTest(id) {
+            editingTestId = id;
+            
+            // 서버에서 해당 시험지 정보 단건 조회
+            const { data: test, error } = await _supabase.from('omr_tests').select('*').eq('id', id).single();
+            if (error || !test) { alert("시험지 정보를 불러오지 못했습니다."); return; }
+
+            // UI 상태를 '수정 모드'로 변환
+            document.getElementById('create-area-title').innerText = "✏️ [최고 관리자] 시험지 수정하기";
+            document.getElementById('new-test-name').value = test.name;
+            document.getElementById('new-test-count').value = test.count;
+            document.getElementById('save-test-btn').innerText = "시험지 수정 완료";
+            document.getElementById('cancel-edit-btn').classList.remove('hidden');
+
+            // 문항 입력칸 생성
+            generateQuestionInputs();
+
+            // 생성된 문항 칸에 기존 정답과 배점 채워넣기
+            for (let i = 1; i <= test.count; i++) {
+                if (test.questions[i - 1]) {
+                    document.getElementById(`ans-${i}`).value = test.questions[i - 1].answer;
+                    document.getElementById(`pt-${i}`).value = test.questions[i - 1].point;
+                }
+            }
+            
+            // 페이지 상단 입력란 위치로 부드럽게 스크롤 이동
+            document.getElementById('super-admin-create-area').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // ★ [기능 추가] 수정 취소 함수
+        function cancelEdit() {
+            editingTestId = null;
+            document.getElementById('create-area-title').innerText = "➕ [최고 관리자] 새 시험지 만들기";
+            document.getElementById('new-test-name').value = '';
+            document.getElementById('new-test-count').value = '';
+            document.getElementById('save-test-btn').innerText = "시험지 최종 배포";
+            document.getElementById('cancel-edit-btn').classList.add('hidden');
+            document.getElementById('admin-questions-area').classList.add('hidden');
+            document.getElementById('admin-questions-tbody').innerHTML = '';
         }
 
         async function saveTest() {
@@ -287,38 +330,41 @@
                 let ansStr = document.getElementById(`ans-${i}`).value;
                 let ptStr = document.getElementById(`pt-${i}`).value;
                 if(!ansStr || !ptStr) { alert("정답이나 배점에 빈칸이 있습니다."); return; }
-                questions.push({ answer: parseInt(ansStr), point: parseFloat(ptStr) });
+                questions.push({ answer: ansStr.trim(), point: parseFloat(ptStr) });
             }
 
-            const { error } = await _supabase.from('omr_tests').insert([
-                { id: Date.now(), user_id: currentUser.id, name: name, count: count, questions: questions }
-            ]);
+            let error = null;
 
-            if (error) {
-                alert("❌ 시험지 배포 실패! 사유: " + error.message);
-                return;
+            if (editingTestId) {
+                // 1. 수정 모드일 때: 기존 행의 데이터만 덮어쓰기 (Update)
+                const { error: updateError } = await _supabase
+                    .from('omr_tests')
+                    .update({ name: name, count: count, questions: questions })
+                    .eq('id', editingTestId);
+                error = updateError;
+            } else {
+                // 2. 신규 생성 모드일 때: 새로 한 줄 추가 (Insert)
+                const { error: insertError } = await _supabase
+                    .from('omr_tests')
+                    .insert([{ id: Date.now(), user_id: currentUser.id, name: name, count: count, questions: questions }]);
+                error = insertError;
             }
 
-            alert("모든 선생님 화면에 시험지가 배포되었습니다!");
-            document.getElementById('new-test-name').value = '';
-            document.getElementById('new-test-count').value = '';
-            document.getElementById('admin-questions-area').classList.add('hidden');
+            if (error) { alert("❌ 서버 반영 실패: " + error.message); return; }
+
+            alert(editingTestId ? "시험지가 성공적으로 수정되었습니다!" : "모든 선생님 화면에 시험지가 배포되었습니다!");
+            cancelEdit();
             await loadAllTests();
         }
 
         async function loadAllTests() {
             const { data: serverTests, error } = await _supabase.from('omr_tests').select('*');
-            
             let ulStudent = document.getElementById('student-test-list');
             ulStudent.innerHTML = '';
             let ulAdmin = document.getElementById('admin-test-list');
             ulAdmin.innerHTML = '';
 
-            if(error) {
-                ulStudent.innerHTML = `<li>서버 연결 에러: ${error.message}</li>`;
-                return;
-            }
-
+            if(error) { ulStudent.innerHTML = `<li>서버 연결 에러: ${error.message}</li>`; return; }
             if(!serverTests || serverTests.length === 0) {
                 ulStudent.innerHTML = '<li>현재 대기 중인 시험지가 없습니다.</li>';
                 ulAdmin.innerHTML = '<li>등록된 시험지가 없습니다.</li>';
@@ -331,10 +377,13 @@
                 ulStudent.appendChild(liStu);
 
                 let liAdm = document.createElement('li');
+                // ★ 최고 관리자일 때만 [시험지 수정] 버튼이 폐기 버튼 옆에 추가로 노출됩니다.
+                let editBtnHtml = isSuperAdmin ? `<button class="view-btn" style="background-color: #34495e;" onclick="editTest(${test.id})">시험지 수정</button>` : '';
                 let deleteBtnHtml = isSuperAdmin ? `<button class="delete-btn" onclick="deleteTest(${test.id})">시험지 폐기</button>` : '';
                 liAdm.innerHTML = `<span><strong>${test.name}</strong> (${test.count}문항)</span>
                     <div>
                         <button class="view-btn" onclick="viewAdminResults(${test.id}, '${test.name}')">결과 확인</button>
+                        ${editBtnHtml}
                         ${deleteBtnHtml}
                     </div>`;
                 ulAdmin.appendChild(liAdm);
@@ -351,7 +400,7 @@
             }
         }
 
-        /* --- 성적 입력 및 제출 --- */
+        /* --- 성적 입력 및 수동 채점 토글 기능 --- */
         async function openExam(id) {
             currentTestId = id;
             const { data } = await _supabase.from('omr_tests').select('*').eq('id', id).single();
@@ -362,13 +411,41 @@
             document.getElementById('exam-result').classList.add('hidden');
             document.getElementById('submit-btn').disabled = false;
             
+            manualGrades = {}; 
+
             let qArea = document.getElementById('student-questions');
             qArea.innerHTML = '';
             for(let i=1; i<=data.count; i++) {
                 let div = document.createElement('div');
                 div.className = 'omr-item';
-                div.innerHTML = `<strong>${i}번</strong> <input type="number" id="stu-ans-${i}">`;
+                div.innerHTML = `
+                    <strong>${i}번</strong> 
+                    <input type="text" id="stu-ans-${i}" placeholder="답안 입력">
+                    <button type="button" class="ox-btn" id="btn-o-${i}" onclick="toggleSelect(${i}, true)">O</button>
+                    <button type="button" class="ox-btn" id="btn-x-${i}" onclick="toggleSelect(${i}, false)">X</button>
+                `;
                 qArea.appendChild(div);
+            }
+        }
+
+        function toggleSelect(qNum, isCorrect) {
+            const btnO = document.getElementById(`btn-o-${qNum}`);
+            const btnX = document.getElementById(`btn-x-${qNum}`);
+
+            if ((isCorrect && manualGrades[qNum] === true) || (!isCorrect && manualGrades[qNum] === false)) {
+                delete manualGrades[qNum];
+                btnO.classList.remove('active-o');
+                btnX.classList.remove('active-x');
+                return;
+            }
+
+            manualGrades[qNum] = isCorrect;
+            if (isCorrect) {
+                btnO.classList.add('active-o');
+                btnX.classList.remove('active-x');
+            } else {
+                btnX.classList.add('active-x');
+                btnO.classList.remove('active-o');
             }
         }
 
@@ -382,12 +459,26 @@
             let wrongList = [];
 
             for(let i=1; i<=test.count; i++) {
-                let stuAnsStr = document.getElementById(`stu-ans-${i}`).value;
-                if(!stuAnsStr) { alert(`${i}번 답이 누락되었습니다.`); document.getElementById('submit-btn').disabled = false; return; }
-                
-                let stuAns = parseInt(stuAnsStr);
-                if (stuAns === test.questions[i-1].answer) totalScore += test.questions[i-1].point;
-                else wrongList.push(i);
+                let isCorrect = false;
+
+                if (manualGrades[i] !== undefined) {
+                    isCorrect = manualGrades[i];
+                } 
+                else {
+                    let stuAnsStr = document.getElementById(`stu-ans-${i}`).value;
+                    let stuAnsClean = String(stuAnsStr).replace(/\s/g, "").toLowerCase();
+                    let correctAnsClean = String(test.questions[i-1].answer).replace(/\s/g, "").toLowerCase();
+                    
+                    if (stuAnsStr && stuAnsClean === correctAnsClean) {
+                        isCorrect = true;
+                    }
+                }
+
+                if (isCorrect) {
+                    totalScore += test.questions[i-1].point;
+                } else {
+                    wrongList.push(i);
+                }
             }
 
             let finalScore = totalScore.toFixed(1);
@@ -399,7 +490,7 @@
             ]);
 
             if (error) {
-                alert("❌ 성적 전송 실패! 사유: " + error.message);
+                alert("❌ 성적 저장 실패: " + error.message);
                 document.getElementById('submit-btn').disabled = false;
                 return;
             }
@@ -422,11 +513,7 @@
             let tbody = document.getElementById('admin-results-tbody');
             tbody.innerHTML = '';
             
-            if(error) {
-                tbody.innerHTML = `<tr><td colspan="6">데이터 로드 에러: ${error.message}</td></tr>`;
-                return;
-            }
-
+            if(error) { tbody.innerHTML = `<tr><td colspan="6">오류: ${error.message}</td></tr>`; return; }
             if(!serverResults || serverResults.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="6">조회할 데이터가 없습니다.</td></tr>';
                 return;
