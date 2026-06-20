@@ -143,7 +143,6 @@
     </div>
 
     <script>
-        // ⚠️ 본인의 정보로 채워넣으셔야 정상 작동합니다!
         const SUPABASE_URL = "https://ltmxwlubtfjlsqdtizcl.supabase.co";
         const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx0bXh3bHVidGZqbHNxZHRpemNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1MzQzNzYsImV4cCI6MjA5NzExMDM3Nn0.nBqexNA_K4wFnfomVxuVkK0QErqz4GCZwBrYWmZBPQw";
         const SUPER_ADMIN_EMAIL = "lim200404@naver.com"; 
@@ -242,7 +241,7 @@
                     } else {
                         document.getElementById('dashboard-title').innerText = "🛠️ 선생님 개인 대시보드";
                     }
-                    cancelEdit(); // 대시보드 진입 시 수정 상태 초기화
+                    cancelEdit(); 
                     await loadAllTests(); 
                     closeAdminResults();
                 }
@@ -431,6 +430,7 @@
             const btnO = document.getElementById(`btn-o-${qNum}`);
             const btnX = document.getElementById(`btn-x-${qNum}`);
 
+            // 이미 활성화된 버튼을 또 누르면 선택 해제
             if ((isCorrect && manualGrades[qNum] === true) || (!isCorrect && manualGrades[qNum] === false)) {
                 delete manualGrades[qNum];
                 btnO.classList.remove('active-o');
@@ -448,6 +448,7 @@
             autoUpdateScore(); 
         }
 
+        // 💡 [수정 사항] 사용자가 타이핑하는 변화를 실시간으로 인지하여 성적 박스 연동
         document.getElementById('student-exam-page').addEventListener('input', autoUpdateScore);
 
         function autoUpdateScore() {
@@ -488,21 +489,21 @@
 
             let totalScore = 0;
             let wrongList = [];
-            let currentStudentAnswers = {}; // 학생 답안 기록 저장소
+            let currentStudentAnswers = {}; 
 
             for(let i=1; i<=currentTestCount; i++) {
                 let isCorrect = false;
 
                 if (manualGrades[i] !== undefined) {
                     isCorrect = manualGrades[i];
-                    currentStudentAnswers[i] = { type: 'manual', value: manualGrades[i] }; // 수동 입력 기록
+                    currentStudentAnswers[i] = { type: 'manual', value: manualGrades[i] }; 
                 } 
                 else {
                     let stuAnsStr = document.getElementById(`stu-ans-${i}`).value;
                     let stuAnsClean = String(stuAnsStr).replace(/\s/g, "").toLowerCase();
                     let correctAnsClean = String(currentTestQuestions[i-1].answer).replace(/\s/g, "").toLowerCase();
                     
-                    currentStudentAnswers[i] = { type: 'text', value: stuAnsStr }; // 텍스트 입력 기록
+                    currentStudentAnswers[i] = { type: 'text', value: stuAnsStr }; 
 
                     if (stuAnsStr && stuAnsClean === correctAnsClean) {
                         isCorrect = true;
@@ -527,7 +528,7 @@
                         id: currentResultId, test_id: currentTestId, user_id: currentUser.id, 
                         teacher_email: currentUser.email, date: dateString, student_name: studentName, 
                         score: finalScore, wrong_list: wrongList,
-                        student_answers: currentStudentAnswers // 답안 DB 저장
+                        student_answers: currentStudentAnswers 
                     }
                 ]);
 
@@ -542,7 +543,7 @@
                 const { error } = await _supabase.from('omr_results').update(
                     { 
                         student_name: studentName, score: finalScore, wrong_list: wrongList,
-                        student_answers: currentStudentAnswers // 수정된 답안 DB 업데이트
+                        student_answers: currentStudentAnswers 
                     }
                 ).eq('id', currentResultId);
 
@@ -584,7 +585,6 @@
                 let tr = document.createElement('tr');
                 let teacherTdHtml = isSuperAdmin ? `<td style="color:#2980b9; font-size:13px;">${res.teacher_email}</td>` : '';
                 
-                // ★ 학생 답 수정 버튼 (작성자 또는 최고 관리자만 노출)
                 let editBtnHtml = (isSuperAdmin || res.user_id === currentUser.id) ? `<button class="view-btn" style="background-color: #27ae60;" onclick="editStudentResult(${res.id}, ${targetTestId})">답 수정</button>` : '';
                 let deleteBtnHtml = (isSuperAdmin || res.user_id === currentUser.id) ? `<button class="delete-btn" onclick="deleteSingleResult(${res.id}, ${targetTestId}, '${testName}')">삭제</button>` : '권한없음';
 
@@ -599,40 +599,48 @@
             });
         }
 
-        // ★ 대시보드에서 특정 학생의 기존 입력 데이터를 불러와서 폼에 채워주는 기능
+        // 🎯 [핵심 수정 함수] 대시보드에서 특정 학생의 기존 입력 데이터를 완벽하게 복원 및 유지
         async function editStudentResult(resultId, testId) {
             const { data: resData, error } = await _supabase.from('omr_results').select('*').eq('id', resultId).single();
             if (error || !resData) { alert("데이터를 불러오지 못했습니다."); return; }
 
-            // 시험지 입력 UI 띄우기
+            // 1단계: 먼저 빈 입력창들을 화면에 동적 빌드합니다.
             await openExam(testId);
 
-            // 해당 학생 데이터로 강제 할당 (Update 모드 진입)
+            // 2단계: 새로 그려진 폼에 불러온 기존 데이터들을 대입하여 입력 상태를 그대로 남겨둡니다.
             currentResultId = resData.id;
             document.getElementById('student-name').value = resData.student_name;
 
-            // 학생이 적었던 기존 답안 복원
             if (resData.student_answers) {
                 for (let i = 1; i <= currentTestCount; i++) {
                     let ans = resData.student_answers[i];
                     if (ans) {
                         if (ans.type === 'manual') {
-                            toggleSelect(i, ans.value);
+                            // O/X 수동 토글 활성화 상태를 그대로 시각적으로 켜줍니다.
+                            manualGrades[i] = ans.value;
+                            if (ans.value === true) {
+                                document.getElementById(`btn-o-${i}`).classList.add('active-o');
+                            } else if (ans.value === false) {
+                                document.getElementById(`btn-x-${i}`).classList.add('active-x');
+                            }
                         } else {
+                            // 텍스트로 적었던 학생의 답안 문자를 입력칸에 그대로 남겨둡니다.
                             document.getElementById(`stu-ans-${i}`).value = ans.value;
                         }
                     }
                 }
             }
 
-            // 버튼 UI 변경
+            // 3단계: 하단 결과 상자를 노출하고 버튼 UI를 갱신합니다.
+            let resultDiv = document.getElementById('exam-result');
+            resultDiv.classList.remove('hidden');
+            
             let submitBtn = document.getElementById('submit-btn');
             submitBtn.innerText = "수정된 성적 다시 제출 (서버 업데이트)";
             submitBtn.style.backgroundColor = "#f39c12";
             
-            autoUpdateScore(); // 현재 폼에 불러온 점수로 업데이트
+            autoUpdateScore(); // 채점 연산 함수를 호출해 화면에 기존 점수 박스를 복원
             
-            // 맨 위로 부드럽게 스크롤
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
