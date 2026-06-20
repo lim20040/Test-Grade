@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>OMR 자동 채점 시스템 - 시험지 수정 기능 버전</title>
+    <title>OMR 자동 채점 시스템 - 성적 수정 기능 완벽 버전</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
     <style>
         body { font-family: '맑은 고딕', sans-serif; background-color: #f4f7f6; margin: 0; padding: 0; color: #333; }
@@ -143,7 +143,7 @@
     </div>
 
     <script>
-        // ⚠️ 본인의 정보로 채워넣으셔야 정상 작동합니다!
+        // 선생님의 정보를 완벽하게 미리 입력해 두었습니다! 
         const SUPABASE_URL = "https://ltmxwlubtfjlsqdtizcl.supabase.co";
         const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx0bXh3bHVidGZqbHNxZHRpemNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1MzQzNzYsImV4cCI6MjA5NzExMDM3Nn0.nBqexNA_K4wFnfomVxuVkK0QErqz4GCZwBrYWmZBPQw";
         const SUPER_ADMIN_EMAIL = "lim200404@naver.com"; 
@@ -155,11 +155,13 @@
         let currentTestId = null;
         let isSuperAdmin = false;
         let manualGrades = {}; 
-        
-        // ★ 현재 수정 중인 시험지의 ID를 저장할 변수 (null이면 신규 출제 모드)
         let editingTestId = null; 
+        
+        // ★ 성적 수정을 위해 현재 보고 있는 테이블의 데이터를 저장하는 변수
+        let currentTargetTestId = null;
+        let currentTargetTestName = "";
+        let currentTestResults = [];
 
-        // 세션 체크 및 자동 로그인
         _supabase.auth.getSession().then(({ data: { session } }) => {
             if (session) handleAuthSuccess(session.user);
             else showPage('auth');
@@ -240,7 +242,7 @@
                     } else {
                         document.getElementById('dashboard-title').innerText = "🛠️ 선생님 개인 대시보드";
                     }
-                    cancelEdit(); // 대시보드 진입 시 수정 상태 초기화
+                    cancelEdit(); 
                     await loadAllTests(); 
                     closeAdminResults();
                 }
@@ -276,37 +278,28 @@
             document.getElementById('admin-questions-area').classList.remove('hidden');
         }
 
-        // ★ [기능 추가] 수정 버튼을 눌렀을 때 기존 데이터를 입력창에 채워주는 함수
         async function editTest(id) {
             editingTestId = id;
-            
-            // 서버에서 해당 시험지 정보 단건 조회
             const { data: test, error } = await _supabase.from('omr_tests').select('*').eq('id', id).single();
             if (error || !test) { alert("시험지 정보를 불러오지 못했습니다."); return; }
 
-            // UI 상태를 '수정 모드'로 변환
             document.getElementById('create-area-title').innerText = "✏️ [최고 관리자] 시험지 수정하기";
             document.getElementById('new-test-name').value = test.name;
             document.getElementById('new-test-count').value = test.count;
             document.getElementById('save-test-btn').innerText = "시험지 수정 완료";
             document.getElementById('cancel-edit-btn').classList.remove('hidden');
 
-            // 문항 입력칸 생성
             generateQuestionInputs();
 
-            // 생성된 문항 칸에 기존 정답과 배점 채워넣기
             for (let i = 1; i <= test.count; i++) {
                 if (test.questions[i - 1]) {
                     document.getElementById(`ans-${i}`).value = test.questions[i - 1].answer;
                     document.getElementById(`pt-${i}`).value = test.questions[i - 1].point;
                 }
             }
-            
-            // 페이지 상단 입력란 위치로 부드럽게 스크롤 이동
             document.getElementById('super-admin-create-area').scrollIntoView({ behavior: 'smooth' });
         }
 
-        // ★ [기능 추가] 수정 취소 함수
         function cancelEdit() {
             editingTestId = null;
             document.getElementById('create-area-title').innerText = "➕ [최고 관리자] 새 시험지 만들기";
@@ -336,17 +329,10 @@
             let error = null;
 
             if (editingTestId) {
-                // 1. 수정 모드일 때: 기존 행의 데이터만 덮어쓰기 (Update)
-                const { error: updateError } = await _supabase
-                    .from('omr_tests')
-                    .update({ name: name, count: count, questions: questions })
-                    .eq('id', editingTestId);
+                const { error: updateError } = await _supabase.from('omr_tests').update({ name: name, count: count, questions: questions }).eq('id', editingTestId);
                 error = updateError;
             } else {
-                // 2. 신규 생성 모드일 때: 새로 한 줄 추가 (Insert)
-                const { error: insertError } = await _supabase
-                    .from('omr_tests')
-                    .insert([{ id: Date.now(), user_id: currentUser.id, name: name, count: count, questions: questions }]);
+                const { error: insertError } = await _supabase.from('omr_tests').insert([{ id: Date.now(), user_id: currentUser.id, name: name, count: count, questions: questions }]);
                 error = insertError;
             }
 
@@ -377,7 +363,6 @@
                 ulStudent.appendChild(liStu);
 
                 let liAdm = document.createElement('li');
-                // ★ 최고 관리자일 때만 [시험지 수정] 버튼이 폐기 버튼 옆에 추가로 노출됩니다.
                 let editBtnHtml = isSuperAdmin ? `<button class="view-btn" style="background-color: #34495e;" onclick="editTest(${test.id})">시험지 수정</button>` : '';
                 let deleteBtnHtml = isSuperAdmin ? `<button class="delete-btn" onclick="deleteTest(${test.id})">시험지 폐기</button>` : '';
                 liAdm.innerHTML = `<span><strong>${test.name}</strong> (${test.count}문항)</span>
@@ -400,7 +385,6 @@
             }
         }
 
-        /* --- 성적 입력 및 수동 채점 토글 기능 --- */
         async function openExam(id) {
             currentTestId = id;
             const { data } = await _supabase.from('omr_tests').select('*').eq('id', id).single();
@@ -501,46 +485,116 @@
             alert("최고 관리자 서버로 성적이 전송되었습니다!");
         }
 
-        /* --- 대시보드 결과 조회 --- */
+        /* --- 대시보드 성적 리스트 불러오기 --- */
         async function viewAdminResults(targetTestId, testName) {
             document.getElementById('admin-specific-results-area').classList.remove('hidden');
             document.getElementById('admin-results-title').innerHTML = `📊 [${testName}] 입력 현황`;
+
+            // 나중에 수정을 누를 때를 대비해 어떤 시험지인지 정보 저장
+            currentTargetTestId = targetTestId;
+            currentTargetTestName = testName;
 
             let query = _supabase.from('omr_results').select('*').eq('test_id', targetTestId);
             if (!isSuperAdmin) { query = query.eq('user_id', currentUser.id); }
 
             const { data: serverResults, error } = await query;
+            if(error) { document.getElementById('admin-results-tbody').innerHTML = `<tr><td colspan="6">오류: ${error.message}</td></tr>`; return; }
+            
+            // 최신 성적이 위에 오도록 배열 뒤집고 전역 변수에 저장
+            currentTestResults = serverResults ? serverResults.reverse() : [];
+            renderResultsTable(); // 테이블 그리기 함수 호출
+        }
+
+        // ★ [기능 추가] 성적 테이블을 화면에 그려주는 전용 함수 (수정 모드 포함)
+        function renderResultsTable(editingResultId = null) {
             let tbody = document.getElementById('admin-results-tbody');
             tbody.innerHTML = '';
             
-            if(error) { tbody.innerHTML = `<tr><td colspan="6">오류: ${error.message}</td></tr>`; return; }
-            if(!serverResults || serverResults.length === 0) {
+            if(currentTestResults.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="6">조회할 데이터가 없습니다.</td></tr>';
                 return;
             }
 
-            serverResults.reverse().forEach(res => {
+            currentTestResults.forEach(res => {
                 let tr = document.createElement('tr');
-                let teacherTdHtml = isSuperAdmin ? `<td style="color:#2980b9; font-size:13px;">${res.teacher_email}</td>` : '';
-                let deleteBtnHtml = (isSuperAdmin || res.user_id === currentUser.id) ? `<button class="delete-btn" onclick="deleteSingleResult(${res.id}, ${targetTestId}, '${testName}')">삭제</button>` : '권한없음';
+                
+                // 1) 만약 이 줄이 '수정 버튼'이 눌린 줄이라면 텍스트 박스로 바꿉니다.
+                if (res.id === editingResultId) {
+                    let wrongStr = res.wrong_list.join(', ');
+                    let teacherTdHtml = isSuperAdmin ? `<td style="color:#2980b9; font-size:13px;">${res.teacher_email}</td>` : '';
+                    
+                    tr.innerHTML = `
+                        <td>${res.date}</td>
+                        <td><input type="text" id="edit-name-${res.id}" value="${res.student_name}" style="width: 80px; text-align:center;"></td>
+                        <td><input type="number" id="edit-score-${res.id}" value="${res.score}" style="width: 60px; text-align:center;" step="0.1">점</td>
+                        ${teacherTdHtml}
+                        <td><input type="text" id="edit-wrong-${res.id}" value="${wrongStr}" placeholder="예: 1, 3" style="width: 100px; text-align:center;"></td>
+                        <td>
+                            <button class="primary-btn" style="padding: 4px 8px; font-size: 12px; margin-right: 4px;" onclick="saveResultEdit(${res.id})">저장</button>
+                            <button class="secondary-btn" style="padding: 4px 8px; font-size: 12px;" onclick="renderResultsTable()">취소</button>
+                        </td>`;
+                } 
+                // 2) 수정 중이 아닌 일반 줄이라면 평범하게 보여줍니다.
+                else {
+                    let teacherTdHtml = isSuperAdmin ? `<td style="color:#2980b9; font-size:13px;">${res.teacher_email}</td>` : '';
+                    let canEdit = (isSuperAdmin || res.user_id === currentUser.id);
+                    
+                    // 성적 수정 버튼이 추가되었습니다!
+                    let editBtnHtml = canEdit ? `<button class="view-btn" style="background-color: #27ae60;" onclick="renderResultsTable(${res.id})">성적 수정</button>` : '';
+                    let deleteBtnHtml = canEdit ? `<button class="delete-btn" onclick="deleteSingleResult(${res.id})">삭제</button>` : '권한없음';
 
-                tr.innerHTML = `
-                    <td>${res.date}</td>
-                    <td><strong>${res.student_name}</strong></td>
-                    <td style="color:#c0392b; font-weight:bold;">${res.score}점</td>
-                    ${teacherTdHtml}
-                    <td>${res.wrong_list.length > 0 ? res.wrong_list.join(', ') + '번' : '만점'}</td>
-                    <td>${deleteBtnHtml}</td>`;
+                    tr.innerHTML = `
+                        <td>${res.date}</td>
+                        <td><strong>${res.student_name}</strong></td>
+                        <td style="color:#c0392b; font-weight:bold;">${res.score}점</td>
+                        ${teacherTdHtml}
+                        <td>${res.wrong_list.length > 0 ? res.wrong_list.join(', ') + '번' : '만점'}</td>
+                        <td>${editBtnHtml}${deleteBtnHtml}</td>`;
+                }
                 tbody.appendChild(tr);
             });
         }
 
+        // ★ [기능 추가] 수정한 성적을 서버에 덮어씌우는 함수
+        async function saveResultEdit(resultId) {
+            let newName = document.getElementById(`edit-name-${resultId}`).value.trim();
+            let newScoreStr = document.getElementById(`edit-score-${resultId}`).value;
+            let newScore = parseFloat(newScoreStr);
+            let newWrongStr = document.getElementById(`edit-wrong-${resultId}`).value.trim();
+
+            if (!newName || isNaN(newScore)) {
+                alert("학생 이름과 점수는 빈칸일 수 없습니다!");
+                return;
+            }
+
+            // '1, 3, 5' 처럼 입력된 틀린 문항 번호를 분리해서 숫자 배열로 만듦
+            let newWrongList = [];
+            if (newWrongStr) {
+                newWrongList = newWrongStr.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+            }
+
+            // Supabase 서버에 덮어쓰기 요청
+            const { error } = await _supabase
+                .from('omr_results')
+                .update({ student_name: newName, score: newScore, wrong_list: newWrongList })
+                .eq('id', resultId);
+
+            if (error) {
+                alert("❌ 성적 수정 실패: " + error.message);
+                return;
+            }
+
+            alert("성적 기록이 성공적으로 수정되었습니다!");
+            // 테이블을 다시 불러와서 새로고침
+            await viewAdminResults(currentTargetTestId, currentTargetTestName);
+        }
+
         function closeAdminResults() { document.getElementById('admin-specific-results-area').classList.add('hidden'); }
 
-        async function deleteSingleResult(resultId, testId, testName) {
+        async function deleteSingleResult(resultId) {
             if(confirm("이 성적 기록을 서버에서 영구 삭제하시겠습니까?")) {
                 await _supabase.from('omr_results').delete().eq('id', resultId);
-                await viewAdminResults(testId, testName);
+                await viewAdminResults(currentTargetTestId, currentTargetTestName);
             }
         }
     </script>
