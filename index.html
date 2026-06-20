@@ -34,10 +34,6 @@
         .omr-item { display: flex; align-items: center; background: white; padding: 8px 15px; border-radius: 5px; border: 1px solid #ddd; gap: 6px; }
         .omr-item strong { width: 40px; color: #2c3e50; }
         .omr-item input { width: 80px; text-align: center; font-size: 15px; }
-        
-        .ox-btn { border: 1px solid #ccc; background: #fff; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 14px; color: #555; }
-        .ox-btn.active-o { background-color: #2ecc71 !important; color: white !important; border-color: #27ae60 !important; }
-        .ox-btn.active-x { background-color: #e74c3c !important; color: white !important; border-color: #c0392b !important; }
 
         .hidden { display: none !important; }
         .result-box { margin-top: 25px; padding: 20px; background-color: #fff3cd; border: 1px solid #ffe69c; border-radius: 8px; text-align: center; font-size: 18px; }
@@ -153,7 +149,6 @@
         let currentUser = null;
         let currentTestId = null;
         let isSuperAdmin = false;
-        let manualGrades = {}; 
         
         let editingTestId = null; 
         let currentResultId = null; 
@@ -318,7 +313,7 @@
             let count = parseInt(document.getElementById('new-test-count').value);
             let questions = [];
 
-            if(!name || isNaN(count)) { alert("시험지 이름과 문항수를 적어주세요."); return; }
+            if(!name || isNaN(count)) { alert("시험지 이름 and 문항수를 적어주세요."); return; }
 
             for (let i = 1; i <= count; i++) {
                 let ansStr = document.getElementById(`ans-${i}`).value;
@@ -391,7 +386,7 @@
             }
         }
 
-        /* --- 성적 입력 및 수동 채점 토글 기능 --- */
+        /* --- 성적 입력 기능 (O/X 버튼 제거됨) --- */
         async function openExam(id) {
             currentTestId = id;
             currentResultId = null; 
@@ -408,8 +403,6 @@
             let submitBtn = document.getElementById('submit-btn');
             submitBtn.innerText = "성적 제출 (서버 기록)";
             submitBtn.style.backgroundColor = "#2ecc71"; 
-            
-            manualGrades = {}; 
 
             let qArea = document.getElementById('student-questions');
             qArea.innerHTML = '';
@@ -419,36 +412,12 @@
                 div.innerHTML = `
                     <strong>${i}번</strong> 
                     <input type="text" id="stu-ans-${i}" placeholder="답안 입력">
-                    <button type="button" class="ox-btn" id="btn-o-${i}" onclick="toggleSelect(${i}, true)">O</button>
-                    <button type="button" class="ox-btn" id="btn-x-${i}" onclick="toggleSelect(${i}, false)">X</button>
                 `;
                 qArea.appendChild(div);
             }
         }
 
-        function toggleSelect(qNum, isCorrect) {
-            const btnO = document.getElementById(`btn-o-${qNum}`);
-            const btnX = document.getElementById(`btn-x-${qNum}`);
-
-            // 이미 활성화된 버튼을 또 누르면 선택 해제
-            if ((isCorrect && manualGrades[qNum] === true) || (!isCorrect && manualGrades[qNum] === false)) {
-                delete manualGrades[qNum];
-                btnO.classList.remove('active-o');
-                btnX.classList.remove('active-x');
-            } else {
-                manualGrades[qNum] = isCorrect;
-                if (isCorrect) {
-                    btnO.classList.add('active-o');
-                    btnX.classList.remove('active-x');
-                } else {
-                    btnX.classList.add('active-x');
-                    btnO.classList.remove('active-o');
-                }
-            }
-            autoUpdateScore(); 
-        }
-
-        // 💡 [수정 사항] 사용자가 타이핑하는 변화를 실시간으로 인지하여 성적 박스 연동
+        // 사용자가 타이핑하는 변화를 실시간으로 인지하여 성적 박스 연동
         document.getElementById('student-exam-page').addEventListener('input', autoUpdateScore);
 
         function autoUpdateScore() {
@@ -460,17 +429,12 @@
             for(let i=1; i<=currentTestCount; i++) {
                 let isCorrect = false;
 
-                if (manualGrades[i] !== undefined) {
-                    isCorrect = manualGrades[i];
-                } 
-                else {
-                    let stuAnsStr = document.getElementById(`stu-ans-${i}`).value;
-                    let stuAnsClean = String(stuAnsStr).replace(/\s/g, "").toLowerCase();
-                    let correctAnsClean = String(currentTestQuestions[i-1].answer).replace(/\s/g, "").toLowerCase();
-                    
-                    if (stuAnsStr && stuAnsClean === correctAnsClean) {
-                        isCorrect = true;
-                    }
+                let stuAnsStr = document.getElementById(`stu-ans-${i}`).value;
+                let stuAnsClean = String(stuAnsStr).replace(/\s/g, "").toLowerCase();
+                let correctAnsClean = String(currentTestQuestions[i-1].answer).replace(/\s/g, "").toLowerCase();
+                
+                if (stuAnsStr && stuAnsClean === correctAnsClean) {
+                    isCorrect = true;
                 }
 
                 if (isCorrect) {
@@ -494,20 +458,14 @@
             for(let i=1; i<=currentTestCount; i++) {
                 let isCorrect = false;
 
-                if (manualGrades[i] !== undefined) {
-                    isCorrect = manualGrades[i];
-                    currentStudentAnswers[i] = { type: 'manual', value: manualGrades[i] }; 
-                } 
-                else {
-                    let stuAnsStr = document.getElementById(`stu-ans-${i}`).value;
-                    let stuAnsClean = String(stuAnsStr).replace(/\s/g, "").toLowerCase();
-                    let correctAnsClean = String(currentTestQuestions[i-1].answer).replace(/\s/g, "").toLowerCase();
-                    
-                    currentStudentAnswers[i] = { type: 'text', value: stuAnsStr }; 
+                let stuAnsStr = document.getElementById(`stu-ans-${i}`).value;
+                let stuAnsClean = String(stuAnsStr).replace(/\s/g, "").toLowerCase();
+                let correctAnsClean = String(currentTestQuestions[i-1].answer).replace(/\s/g, "").toLowerCase();
+                
+                currentStudentAnswers[i] = { type: 'text', value: stuAnsStr }; 
 
-                    if (stuAnsStr && stuAnsClean === correctAnsClean) {
-                        isCorrect = true;
-                    }
+                if (stuAnsStr && stuAnsClean === correctAnsClean) {
+                    isCorrect = true;
                 }
 
                 if (isCorrect) {
@@ -599,7 +557,7 @@
             });
         }
 
-        // 🎯 [핵심 수정 함수] 대시보드에서 특정 학생의 기존 입력 데이터를 완벽하게 복원 및 유지
+        // 대시보드에서 특정 학생의 기존 입력 데이터를 완벽하게 복원 및 유지
         async function editStudentResult(resultId, testId) {
             const { data: resData, error } = await _supabase.from('omr_results').select('*').eq('id', resultId).single();
             if (error || !resData) { alert("데이터를 불러오지 못했습니다."); return; }
@@ -614,19 +572,9 @@
             if (resData.student_answers) {
                 for (let i = 1; i <= currentTestCount; i++) {
                     let ans = resData.student_answers[i];
-                    if (ans) {
-                        if (ans.type === 'manual') {
-                            // O/X 수동 토글 활성화 상태를 그대로 시각적으로 켜줍니다.
-                            manualGrades[i] = ans.value;
-                            if (ans.value === true) {
-                                document.getElementById(`btn-o-${i}`).classList.add('active-o');
-                            } else if (ans.value === false) {
-                                document.getElementById(`btn-x-${i}`).classList.add('active-x');
-                            }
-                        } else {
-                            // 텍스트로 적었던 학생의 답안 문자를 입력칸에 그대로 남겨둡니다.
-                            document.getElementById(`stu-ans-${i}`).value = ans.value;
-                        }
+                    if (ans && ans.type === 'text') {
+                        // 텍스트로 적었던 학생의 답안 문자를 입력칸에 그대로 남겨둡니다.
+                        document.getElementById(`stu-ans-${i}`).value = ans.value;
                     }
                 }
             }
@@ -639,7 +587,7 @@
             submitBtn.innerText = "수정된 성적 다시 제출 (서버 업데이트)";
             submitBtn.style.backgroundColor = "#f39c12";
             
-            autoUpdateScore(); // 채점 연산 함수를 호출해 화면에 기존 점수 박스를 복원
+            autoUpdateScore(); 
             
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
