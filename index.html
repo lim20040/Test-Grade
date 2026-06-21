@@ -2,8 +2,10 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>OMR 자동 채점 시스템 - 시험지 수정 기능 버전</title>
+    <title>OMR 자동 채점 시스템 - 최종 엑셀 연동</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx-populate/1.21.0/xlsx-populate.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
     <style>
         body { font-family: '맑은 고딕', sans-serif; background-color: #f4f7f6; margin: 0; padding: 0; color: #333; }
         .header { background-color: #2c3e50; color: white; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; }
@@ -75,7 +77,7 @@
         <h2 id="exam-title-display">성적 입력 화면</h2>
         <div style="margin-bottom: 20px;">
             <strong>학생 이름:</strong> 
-            <input type="text" id="student-name" placeholder="학생 이름을 입력하세요" style="width: 200px; margin-left: 10px;">
+            <input type="text" id="student-name" placeholder="예: 김정완" style="width: 200px; margin-left: 10px;">
         </div>
         <div id="student-questions" class="omr-grid"></div>
         <div style="display: flex; gap: 10px; margin-top: 20px;">
@@ -114,7 +116,11 @@
         <div id="admin-specific-results-area" class="hidden" style="margin-top: 30px; border-top: 2px dashed #ccc; padding-top: 20px; background-color: #f8f9fa; padding: 20px; border-radius: 8px;">
             <div style="display: flex; justify-content: space-between; align-items: center;">
                 <h3 id="admin-results-title" style="margin: 0;">📊 성적 명단</h3>
-                <button class="secondary-btn" style="margin: 0; padding: 6px 12px; font-size: 14px;" onclick="closeAdminResults()">닫기</button>
+                <div>
+                    <input type="file" id="excel-template-upload" accept=".xlsx" style="display: none;">
+                    <button class="primary-btn" id="export-excel-btn" style="background-color: #27ae60; margin-right: 10px; padding: 6px 12px; font-size: 14px;">엑셀로 결과 뽑기</button>
+                    <button class="secondary-btn" style="margin: 0; padding: 6px 12px; font-size: 14px;" onclick="closeAdminResults()">닫기</button>
+                </div>
             </div>
             <table id="admin-results-table">
                 <thead>
@@ -139,6 +145,7 @@
     </div>
 
     <script>
+        // ⚠️ 선생님의 실제 URL과 KEY를 반드시 다시 입력해주세요!
         const SUPABASE_URL = "https://ltmxwlubtfjlsqdtizcl.supabase.co";
         const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx0bXh3bHVidGZqbHNxZHRpemNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE1MzQzNzYsImV4cCI6MjA5NzExMDM3Nn0.nBqexNA_K4wFnfomVxuVkK0QErqz4GCZwBrYWmZBPQw";
         const SUPER_ADMIN_EMAIL = "lim200404@naver.com"; 
@@ -154,8 +161,10 @@
         let currentResultId = null; 
         let currentTestQuestions = [];
         let currentTestCount = 0;
+        
+        let currentExportTestId = null;
+        let currentExportTestName = "";
 
-        // 세션 체크 및 자동 로그인
         _supabase.auth.getSession().then(({ data: { session } }) => {
             if (session) handleAuthSuccess(session.user);
             else showPage('auth');
@@ -386,7 +395,6 @@
             }
         }
 
-        /* --- 성적 입력 기능 (O/X 버튼 제거됨) --- */
         async function openExam(id) {
             currentTestId = id;
             currentResultId = null; 
@@ -417,7 +425,6 @@
             }
         }
 
-        // 사용자가 타이핑하는 변화를 실시간으로 인지하여 성적 박스 연동
         document.getElementById('student-exam-page').addEventListener('input', autoUpdateScore);
 
         function autoUpdateScore() {
@@ -521,10 +528,12 @@
             submitBtn.style.backgroundColor = "#f39c12"; 
         }
 
-        /* --- 대시보드 결과 조회 및 특정 학생 수정 기능 --- */
         async function viewAdminResults(targetTestId, testName) {
             document.getElementById('admin-specific-results-area').classList.remove('hidden');
             document.getElementById('admin-results-title').innerHTML = `📊 [${testName}] 입력 현황`;
+            
+            currentExportTestId = targetTestId;
+            currentExportTestName = testName;
 
             let query = _supabase.from('omr_results').select('*').eq('test_id', targetTestId);
             if (!isSuperAdmin) { query = query.eq('user_id', currentUser.id); }
@@ -557,15 +566,12 @@
             });
         }
 
-        // 대시보드에서 특정 학생의 기존 입력 데이터를 완벽하게 복원 및 유지
         async function editStudentResult(resultId, testId) {
             const { data: resData, error } = await _supabase.from('omr_results').select('*').eq('id', resultId).single();
             if (error || !resData) { alert("데이터를 불러오지 못했습니다."); return; }
 
-            // 1단계: 먼저 빈 입력창들을 화면에 동적 빌드합니다.
             await openExam(testId);
 
-            // 2단계: 새로 그려진 폼에 불러온 기존 데이터들을 대입하여 입력 상태를 그대로 남겨둡니다.
             currentResultId = resData.id;
             document.getElementById('student-name').value = resData.student_name;
 
@@ -573,13 +579,11 @@
                 for (let i = 1; i <= currentTestCount; i++) {
                     let ans = resData.student_answers[i];
                     if (ans && ans.type === 'text') {
-                        // 텍스트로 적었던 학생의 답안 문자를 입력칸에 그대로 남겨둡니다.
                         document.getElementById(`stu-ans-${i}`).value = ans.value;
                     }
                 }
             }
 
-            // 3단계: 하단 결과 상자를 노출하고 버튼 UI를 갱신합니다.
             let resultDiv = document.getElementById('exam-result');
             resultDiv.classList.remove('hidden');
             
@@ -600,6 +604,130 @@
                 await viewAdminResults(testId, testName);
             }
         }
+
+        // 🎯 [완벽 수정] XlsxPopulate를 이용해 테두리, 간격, 폰트를 100% 보존하는 로직
+        document.getElementById('export-excel-btn').addEventListener('click', function() {
+            document.getElementById('excel-template-upload').click();
+        });
+
+        document.getElementById('excel-template-upload').addEventListener('change', async function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            alert("엑셀 변환을 시작합니다. 잠시만 기다려주세요...");
+
+            // 1. 서버에서 성적 데이터 로드
+            const { data: results, error } = await _supabase.from('omr_results').select('*').eq('test_id', currentExportTestId);
+            if(error) { alert("서버 데이터 불러오기 실패"); e.target.value = ''; return; }
+            if(!results || results.length === 0) { alert("입력된 성적 데이터가 없습니다."); e.target.value = ''; return; }
+
+            const reader = new FileReader();
+            reader.onload = async function(evt) {
+                try {
+                    const buffer = evt.target.result;
+                    
+                    // 💡 XlsxPopulate로 원본 파일 열기 (서식 절대 깨지지 않음)
+                    const workbook = await XlsxPopulate.fromDataAsync(buffer);
+                    const sheet = workbook.sheet(0); 
+
+                    let headerRowIdx = -1;
+                    let qColMap = {};
+                    let attendanceColIdx = -1;
+
+                    // 2. 문제 번호가 적힌 헤더(가로줄) 찾기 (1~200줄, 1~100칸 정도 탐색)
+                    for (let r = 1; r <= 200; r++) {
+                        if (headerRowIdx !== -1) break;
+                        for (let c = 1; c <= 100; c++) {
+                            let val = sheet.row(r).cell(c).value();
+                            if (val !== undefined && val !== null) {
+                                let text = String(val).replace(/\s/g, "");
+                                // '1' 또는 '1번' 글자가 있으면 그 줄을 문제 번호 줄로 판단
+                                if (text === '1' || text === '1번') {
+                                    headerRowIdx = r;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    if (headerRowIdx === -1) {
+                        alert("⚠️ 엑셀 양식에서 문제 번호(1 또는 1번)가 적힌 줄을 찾지 못했습니다.");
+                        return;
+                    }
+
+                    // 열 맵핑 (문제 번호가 몇 번째 열에 있는지 기록)
+                    for (let c = 1; c <= 100; c++) {
+                        let val = sheet.row(headerRowIdx).cell(c).value();
+                        if (val !== undefined && val !== null) {
+                            let text = String(val).replace(/\s/g, "");
+                            let match = text.match(/^(\d+)번?$/); // '1번' -> 1
+                            if (match) {
+                                qColMap[parseInt(match[1])] = c;
+                            }
+                            if (text.includes("응시")) {
+                                attendanceColIdx = c;
+                            }
+                        }
+                    }
+
+                    let matchCount = 0;
+
+                    // 3. 학생 이름 찾아 데이터 기입 ('김정완'을 '김정완R'에서도 찾아냄)
+                    results.forEach(studentResult => {
+                        const stuName = studentResult.student_name.replace(/\s/g, "");
+                        const wrongList = studentResult.wrong_list || [];
+
+                        let stuRowIdx = -1;
+                        for (let r = 1; r <= 300; r++) {
+                            if (stuRowIdx !== -1) break;
+                            for (let c = 1; c <= 30; c++) { // 이름은 보통 앞쪽 열에 있음
+                                let val = sheet.row(r).cell(c).value();
+                                if (val !== undefined && val !== null) {
+                                    let cellText = String(val).replace(/\s/g, "");
+                                    // 💡 핵심: 엑셀 이름(김정완R)이 웹 이름(김정완)을 포함하고 있으면 동일인물로 간주
+                                    if (cellText.length >= 2 && cellText.includes(stuName)) {
+                                        stuRowIdx = r;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        if (stuRowIdx !== -1) {
+                            matchCount++;
+                            // ① 틀린 번호 칸에 'x' 기입
+                            wrongList.forEach(qNum => {
+                                let colIdx = qColMap[qNum];
+                                if (colIdx) {
+                                    sheet.row(stuRowIdx).cell(colIdx).value("x");
+                                }
+                            });
+
+                            // ② 응시여부 열 'x' 지우기
+                            if (attendanceColIdx !== -1) {
+                                sheet.row(stuRowIdx).cell(attendanceColIdx).value("");
+                            }
+                        }
+                    });
+
+                    // 4. 결과 다운로드
+                    if (matchCount === 0) {
+                        alert("⚠️ 엑셀 양식의 이름과 웹에 입력된 이름이 일치하지 않습니다.\n(예: 엑셀에 '김정완R'이 있다면 웹에는 최소 '김정완'이라고 입력되어야 합니다.)");
+                    } else {
+                        alert(`🎉 완벽합니다! 총 ${matchCount}명의 학생 데이터를 엑셀에 입력했습니다. (테두리, 서식 보존)`);
+                        const outBlob = await workbook.outputAsync();
+                        saveAs(outBlob, `[완료]${currentExportTestName}_결과.xlsx`);
+                    }
+
+                } catch (err) {
+                    alert("엑셀 변환 중 오류가 발생했습니다: " + err.message);
+                    console.error(err);
+                }
+            };
+            
+            reader.readAsArrayBuffer(file);
+            e.target.value = ''; 
+        });
     </script>
 </body>
 </html>
